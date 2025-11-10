@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Arc Animáció - Frame #24 (bin)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            flex: 1;
+            display: block;
+        }
+        
+        #sidebar {
+            width: 350px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            overflow-y: auto;
+            padding: 20px;
+            border-left: 2px solid #667eea;
+        }
+        
+        #sidebar h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        #sidebar h3 {
+            color: #aaa;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        .frame-info {
+            background: rgba(102, 126, 234, 0.2);
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        .frame-info label {
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .frame-info div {
+            margin: 5px 0;
+        }
+        
+        .blend-shape-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .blend-shape-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #fff;
+            font-size: 12px;
+        }
+        
+        .blend-shape-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .blend-shape-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 3px;
+            transition: width 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 5px;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .control-item {
+            margin: 12px 0;
+        }
+        
+        .control-item label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+        
+        .control-item input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #764ba2;
+        }
+        
+        .warning {
+            color: #ffaa33;
+            font-size: 12px;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255, 170, 51, 0.1);
+            border-left: 2px solid #ffaa33;
+            border-radius: 3px;
+        }
+        
+        #scrollArea {
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas"></div>
+    <div id="sidebar">
+        <h2>🎭 Arcállásfelvétel</h2>
+        
+        <div class="frame-info">
+            <div><label>Frame:</label> #24</div>
+            <div><label>Szó:</label> <span style="color: #667eea; font-size: 14px; font-weight: bold;">bin</span></div>
+            <div><label>Idő:</label> 0.960s</div>
+            <div><label>Speaker:</label> s1</div>
+            <div><label>Videó:</label> bbaf2n.mpg</div>
+        </div>
+        
+        <h3>📊 Aktív Arcállások</h3>
+        <div id="blendShapesList"></div>
+        
+        <h3>🎮 Kontrollok</h3>
+        <div class="controls">
+            <div class="control-item">
+                <label>Fejforgás X (Pitch)</label>
+                <input type="range" id="rotationX" min="-90" max="90" value="0" step="1">
+            </div>
+            <div class="control-item">
+                <label>Fejforgás Y (Yaw)</label>
+                <input type="range" id="rotationY" min="-90" max="90" value="0" step="1">
+            </div>
+            <div class="control-item">
+                <label>Fejforgás Z (Roll)</label>
+                <input type="range" id="rotationZ" min="-90" max="90" value="0" step="1">
+            </div>
+            <button onclick="resetRotation()">Visszaállítás</button>
+            <button onclick="resetAllInfluences()">Összes Arcállás Törlése</button>
+        </div>
+        
+        <div class="warning">
+            💡 Csúsztasd a szliderek gombokat az arcállások módosításához!
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@r128/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@r128/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+        import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        let scene, camera, renderer, mesh, controls;
+        
+        const BLEND_SHAPES = {"_neutral": 1.1002819064742653e-06, "browDownLeft": 0.0836189016699791, "browDownRight": 0.0819321796298027, "browInnerUp": 0.010686672292649746, "browOuterUpLeft": 0.027345657348632812, "browOuterUpRight": 0.020672280341386795, "cheekPuff": 2.997056071762927e-05, "cheekSquintLeft": 6.369032945485742e-08, "cheekSquintRight": 2.900002584738104e-07, "eyeBlinkLeft": 0.06824439018964767, "eyeBlinkRight": 0.028772883117198944, "eyeLookDownLeft": 0.042542483657598495, "eyeLookDownRight": 0.0383928008377552, "eyeLookInLeft": 0.07164345681667328, "eyeLookInRight": 0.0634504035115242, "eyeLookOutLeft": 0.06475793570280075, "eyeLookOutRight": 0.07184548676013947, "eyeLookUpLeft": 0.1936267614364624, "eyeLookUpRight": 0.2123573124408722, "eyeSquintLeft": 0.4849891662597656, "eyeSquintRight": 0.37221425771713257, "eyeWideLeft": 0.009720700792968273, "eyeWideRight": 0.011127185076475143, "jawForward": 0.0001241079153260216, "jawLeft": 0.003989751450717449, "jawOpen": 0.05294760689139366, "jawRight": 3.303313133073971e-05, "mouthClose": 0.035850051790475845, "mouthDimpleLeft": 0.01857861503958702, "mouthDimpleRight": 0.004862209782004356, "mouthFrownLeft": 1.210213031299645e-05, "mouthFrownRight": 1.6816751667647623e-05, "mouthFunnel": 0.0007802819018252194, "mouthLeft": 0.002517439890652895, "mouthLowerDownLeft": 0.001018530922010541, "mouthLowerDownRight": 0.0012455134419724345, "mouthPressLeft": 0.16083179414272308, "mouthPressRight": 0.04970124363899231, "mouthPucker": 0.0061722928658127785, "mouthRight": 0.0004848539538215846, "mouthRollLower": 0.016087302938103676, "mouthRollUpper": 0.04703891649842262, "mouthShrugLower": 0.001736195175908506, "mouthShrugUpper": 0.00027468556072562933, "mouthSmileLeft": 0.0012774391798302531, "mouthSmileRight": 0.000753064698074013, "mouthStretchLeft": 0.0007908989209681749, "mouthStretchRight": 0.000986353144980967, "mouthUpperUpLeft": 1.131847602664493e-05, "mouthUpperUpRight": 9.445177965972107e-06, "noseSneerLeft": 2.3180292885172094e-07, "noseSneerRight": 3.546058735537372e-07};
+        const ACTIVE_SHAPES = {"browDownLeft": 0.0836189016699791, "browDownRight": 0.0819321796298027, "browInnerUp": 0.010686672292649746, "browOuterUpLeft": 0.027345657348632812, "browOuterUpRight": 0.020672280341386795, "eyeBlinkLeft": 0.06824439018964767, "eyeBlinkRight": 0.028772883117198944, "eyeLookDownLeft": 0.042542483657598495, "eyeLookDownRight": 0.0383928008377552, "eyeLookInLeft": 0.07164345681667328, "eyeLookInRight": 0.0634504035115242, "eyeLookOutLeft": 0.06475793570280075, "eyeLookOutRight": 0.07184548676013947, "eyeLookUpLeft": 0.1936267614364624, "eyeLookUpRight": 0.2123573124408722, "eyeSquintLeft": 0.4849891662597656, "eyeSquintRight": 0.37221425771713257, "eyeWideRight": 0.011127185076475143, "jawOpen": 0.05294760689139366, "mouthClose": 0.035850051790475845, "mouthDimpleLeft": 0.01857861503958702, "mouthPressLeft": 0.16083179414272308, "mouthPressRight": 0.04970124363899231, "mouthRollLower": 0.016087302938103676, "mouthRollUpper": 0.04703891649842262};
+        
+        console.log("🎯 Blend Shapes betöltve:", BLEND_SHAPES);
+        console.log("✅ Aktív Arcállások:", ACTIVE_SHAPES);
+
+        function init() {
+            // Scene
+            const container = document.getElementById('canvas');
+            scene = new THREE.Scene();
+            
+            // Camera
+            camera = new THREE.PerspectiveCamera(
+                45,
+                container.clientWidth / window.innerHeight,
+                1,
+                20
+            );
+            camera.position.set(-1.8, 0.8, 3);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(container.clientWidth, window.innerHeight);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1;
+            renderer.setClearColor(0x666666, 1);
+            container.appendChild(renderer.domElement);
+
+            // Háttér
+            const environment = new RoomEnvironment();
+            const pmremGenerator = new THREE.PMREMGenerator(renderer);
+            scene.environment = pmremGenerator.fromScene(environment).texture;
+
+            // Modell betöltése
+            const loader = new GLTFLoader();
+            
+            // KTX2 loader - szükséges a textúrákhoz
+            const ktx2Loader = new KTX2Loader()
+                .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@r128/examples/jsm/libs/basis/')
+                .detectSupport(renderer);
+            
+            loader.setKTX2Loader(ktx2Loader);
+            loader.setMeshoptDecoder(MeshoptDecoder);
+            
+            loader.load('/models/facecap.glb', (gltf) => {
+                mesh = gltf.scene.children[0];
+                scene.add(mesh);
+
+                // Blend shapes alkalmazása
+                const head = mesh.getObjectByName('mesh_2');
+                if (head && head.morphTargetInfluences) {
+                    applyBlendShapes(head, BLEND_SHAPES);
+                    createBlendShapeControls(head);
+                }
+            });
+
+            // OrbitControls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.minDistance = 2.5;
+            controls.maxDistance = 5;
+            controls.minAzimuthAngle = -Math.PI / 2;
+            controls.maxAzimuthAngle = Math.PI / 2;
+            controls.maxPolarAngle = Math.PI / 1.8;
+            controls.target.set(0, 0.15, -0.2);
+
+            // Animation loop
+            renderer.setAnimationLoop(animate);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function applyBlendShapes(head, blendShapes) {
+            if (!head.morphTargetDictionary) {
+                console.error("❌ Morph target dictionary nem elérhető!");
+                return;
+            }
+
+            let appliedCount = 0;
+            for (const [key, value] of Object.entries(head.morphTargetDictionary)) {
+                const cleanKey = key.replace('blendShape1.', '');
+                const blendValue = blendShapes[cleanKey];
+                
+                if (blendValue !== undefined) {
+                    head.morphTargetInfluences[value] = blendValue;
+                    appliedCount++;
+                }
+            }
+            
+            console.log(`✅ {appliedCount} arcállás alkalmazva!`);
+        }
+
+        function createBlendShapeControls(head) {
+            const listDiv = document.getElementById('blendShapesList');
+            listDiv.innerHTML = '';
+
+            const shapeEntries = Object.entries(ACTIVE_SHAPES)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 15);  // Top 15
+
+            shapeEntries.forEach(([key, value]) => {
+                const item = document.createElement('div');
+                item.className = 'blend-shape-item';
+                
+                const name = document.createElement('div');
+                name.className = 'blend-shape-name';
+                name.textContent = key;
+                
+                const barContainer = document.createElement('div');
+                barContainer.className = 'blend-shape-bar';
+                
+                const bar = document.createElement('div');
+                bar.className = 'blend-shape-fill';
+                bar.style.width = (value * 100) + '%';
+                bar.textContent = (value * 100).toFixed(1) + '%';
+                
+                barContainer.appendChild(bar);
+                item.appendChild(name);
+                item.appendChild(barContainer);
+                
+                // Slider
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.min = '0';
+                slider.max = '1';
+                slider.step = '0.01';
+                slider.value = value;
+                slider.style.marginTop = '5px';
+                slider.style.width = '100%';
+                slider.style.cursor = 'pointer';
+                
+                slider.addEventListener('input', (e) => {
+                    const cleanKey = key.replace('blendShape1.', '');
+                    const dictIndex = head.morphTargetDictionary[key];
+                    head.morphTargetInfluences[dictIndex] = parseFloat(e.target.value);
+                    bar.style.width = (parseFloat(e.target.value) * 100) + '%';
+                    bar.textContent = (parseFloat(e.target.value) * 100).toFixed(1) + '%';
+                });
+                
+                item.appendChild(slider);
+                listDiv.appendChild(item);
+            });
+        }
+
+        function animate() {
+            controls.update();
+            
+            // Fejforgás
+            const rotX = parseFloat(document.getElementById('rotationX').value) * Math.PI / 180;
+            const rotY = parseFloat(document.getElementById('rotationY').value) * Math.PI / 180;
+            const rotZ = parseFloat(document.getElementById('rotationZ').value) * Math.PI / 180;
+            
+            if (mesh) {
+                mesh.rotation.order = 'YXZ';
+                mesh.rotation.x = rotX;
+                mesh.rotation.y = rotY;
+                mesh.rotation.z = rotZ;
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas');
+            camera.aspect = container.clientWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, window.innerHeight);
+        }
+
+        function resetRotation() {
+            document.getElementById('rotationX').value = 0;
+            document.getElementById('rotationY').value = 0;
+            document.getElementById('rotationZ').value = 0;
+        }
+
+        window.resetAllInfluences = function() {
+            // Összes morph target nullázása
+            console.log("🔄 Arcállások visszaállítása...");
+            location.reload();
+        };
+
+        init();
+    </script>
+</body>
+</html>

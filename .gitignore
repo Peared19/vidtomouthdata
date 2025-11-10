@@ -1,0 +1,29 @@
+# Model files
+shape_predictor_68_face_landmarks.dat
+face_landmarker.task
+models/
+
+# NPM
+node_modules/
+package-lock.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Ideiglenes exportok
+animation_data/
+animation_frames/
+
+# Dataset files (too large)
+D:/MestInt/datasets/gridcorpus/mouth_data.csv
+mouth_data.csv
+mouth_data_sample_1000.csv
+vocabulary.json
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~

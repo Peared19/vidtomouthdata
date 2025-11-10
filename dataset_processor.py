@@ -1,37 +1,66 @@
 import os
 import cv2
-import dlib
 import csv
 import json
 import numpy as np
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 from frame_processor import process_frame_full_mouth
 
 # -------------------- Beállítások --------------------
 VIDEO_BASE = "D:/MestInt/datasets/gridcorpus/video"
 ALIGN_BASE = "D:/MestInt/datasets/gridcorpus/align"
 OUTPUT_CSV = "D:/MestInt/datasets/gridcorpus/mouth_data.csv"
+MODEL_PATH = "face_landmarker.task"
 
 os.makedirs("D:/MestInt/datasets/gridcorpus", exist_ok=True)
-OUTPUT_CSV = "D:/MestInt/datasets/gridcorpus/mouth_data.csv"
 
+# Face Landmarker model letöltése ha nincs meg
+if not os.path.exists(MODEL_PATH):
+    print("⏬ Face Landmarker model letöltése...")
+    import urllib.request
+    url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+    try:
+        urllib.request.urlretrieve(url, MODEL_PATH)
+        print("✅ Model letöltve!")
+    except Exception as e:
+        print(f"❌ Model letöltés hiba: {e}")
+        print("Kérjük, töltse le kézzel innen:")
+        print(url)
+        exit(1)
 
-# Arcfelismerő és landmark prediktor betöltése
-detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+# FaceLandmarker inicializálása
+options = vision.FaceLandmarkerOptions(
+    base_options=python.BaseOptions(model_asset_path=MODEL_PATH),
+    running_mode=vision.RunningMode.IMAGE,
+    output_face_blendshapes=True
+)
+
+landmarker = vision.FaceLandmarker.create_from_options(options)
 
 # -------------------- Segédfüggvény --------------------
-def parse_align_file(align_path):
+
+def parse_align_file(align_path, sample_rate=25000):
     """
-    Betölti az align fájlt és listát ad vissza: [(word, start_time, end_time), ...]
+    Betölti az align fájlt és listát ad vissza: [(word, start_time_s, end_time_s), ...]
+    Az align fájlban a GRID corpus mintaszámokat tartalmaz (nem másodperceket),
+    ezért konvertálni kell a sample_rate alapján.
     """
     word_list = []
     with open(align_path, "r") as f:
         for line in f:
             parts = line.strip().split()
             if len(parts) >= 3:
-                # Formátum: start_time end_time word
-                word_list.append((parts[2], float(parts[0]), float(parts[1])))
+                start_sample = float(parts[0])
+                end_sample = float(parts[1])
+                word = parts[2]
+                # Átváltás másodpercre:
+                start_time_s = start_sample / sample_rate
+                end_time_s = end_sample / sample_rate
+                word_list.append((word, start_time_s, end_time_s))
     return word_list
+
 
 # -------------------- Fő feldolgozás --------------------
 with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
@@ -40,7 +69,11 @@ with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
     writer.writerow([
         "speaker", "video", "frame_idx", "word",
         "mouth_center_x", "mouth_center_y",
-        "outer_lip_relative_points", "inner_lip_relative_points"
+        "outer_lip_relative_points", "inner_lip_relative_points",
+        "blend_shapes", "mouth_blend_shapes",
+        "eyes_blend_shapes", "brow_blend_shapes", "face_shape_blend_shapes",
+        "3d_landmarks", "pixel_landmarks", "relative_landmarks",
+        "face_center_pixel", "face_center_3d"
     ])
 
     # Minden speaker mappa
@@ -68,11 +101,11 @@ with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
             align_path = os.path.join(speaker_align_path, align_file_name)
 
             if not os.path.exists(align_path):
-                print(f"⚠️  Missing align file for {video_file}, skipping...")
+                print(f"Missing align file for {video_file}, skipping...")
                 continue
 
             # Betöltjük a transzkripciót
-            word_list = parse_align_file(align_path)
+            word_list = parse_align_file(align_path, sample_rate=25000)
 
             # Videó feldolgozása
             cap = cv2.VideoCapture(video_path)
@@ -84,7 +117,7 @@ with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
                 if not ret:
                     break
 
-                mouth_data = process_frame_full_mouth(frame, detector, predictor)
+                mouth_data = process_frame_full_mouth(frame, landmarker)
                 if mouth_data is None:
                     frame_idx += 1
                     continue
@@ -110,12 +143,21 @@ with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
                     mouth_data["mouth_center"][0],
                     mouth_data["mouth_center"][1],
                     json.dumps(mouth_data["outer_lip_relative_points"]),
-                    json.dumps(mouth_data["inner_lip_relative_points"])
+                    json.dumps(mouth_data["inner_lip_relative_points"]),
+                    json.dumps(mouth_data["blend_shapes"]),
+                    json.dumps(mouth_data["mouth_blend_shapes"]),
+                    json.dumps(mouth_data["eyes_blend_shapes"]),
+                    json.dumps(mouth_data["brow_blend_shapes"]),
+                    json.dumps(mouth_data["face_shape_blend_shapes"]),
+                    json.dumps(mouth_data["3d_landmarks"]),
+                    json.dumps(mouth_data["pixel_landmarks"]),
+                    json.dumps(mouth_data["relative_landmarks"]),
+                    json.dumps(mouth_data["face_center_pixel"]),
+                    json.dumps(mouth_data["face_center_3d"])
                 ])
 
                 frame_idx += 1
 
             cap.release()
-            print(f"✅ Processed {video_file} for {speaker}")
+            print(f"Processed {video_file} for {speaker}")
 
-print("\n🎉 All videos processed and saved to CSV successfully!")
