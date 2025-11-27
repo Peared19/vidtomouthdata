@@ -1,0 +1,275 @@
+# 🚀 PyTorch Pipeline - Quick Reference Card
+
+## Files Created
+
+### Core Training Files (3 files)
+```
+dataloader.py              ← Data loading & batching
+  ├─ MouthAnimationDataset
+  ├─ collate_batch()
+  └─ create_dataloaders()
+
+model.py                   ← Neural networks
+  ├─ TransformerBlendShapeModel (RECOMMENDED)
+  ├─ LSTMBlendShapeModel
+  └─ create_model()
+
+train.py                   ← Training loop
+  ├─ TrainingConfig
+  ├─ Trainer class
+  └─ main()
+```
+
+### Utilities (2 files)
+```
+vocabulary_generator.py    ← Generate vocabulary.json
+  ├─ generate_vocabulary()
+  └─ validate_vocabulary()
+
+README.md                  ← Full documentation
+```
+
+---
+
+## ⚡ Command Sequence
+
+### 1️⃣ Generate Vocabulary (One-time)
+```bash
+python vocabulary_generator.py \
+    --csv gridcorpus/mouth_data_context.csv \
+    --output vocabulary.json \
+    --validate
+```
+**Output:** `vocabulary.json` (55 tokens: 53 words + <START> + <END>)
+
+---
+
+### 2️⃣ Train Model
+```bash
+# Basic (uses defaults)
+python train.py
+
+# Custom configuration
+python train.py \
+    --epochs 50 \
+    --batch-size 64 \
+    --lr 1e-3 \
+    --model-type transformer \
+    --embedding-dim 128 \
+    --num-heads 8 \
+    --num-layers 4
+```
+
+**Output:** 
+- `checkpoints/best_model.pt` ← Best validation loss
+- `logs/run_XXX/` ← TensorBoard metrics
+
+---
+
+### 3️⃣ Monitor Training (in separate terminal)
+```bash
+tensorboard --logdir logs
+# Open: http://localhost:6006
+```
+
+---
+
+## 📊 Model Specifications
+
+### Transformer Model
+| Component | Value |
+|-----------|-------|
+| **Input Features** | 5 (3 words + frame_pos + duration) |
+| **Embedding Dim** | 128 |
+| **Attention Heads** | 8 |
+| **Encoder Layers** | 4 |
+| **FF Network Dim** | 512 |
+| **Output** | 52 blend shapes |
+| **Parameters** | ~500K |
+
+### Training Settings
+| Setting | Value |
+|---------|-------|
+| **Batch Size** | 64 |
+| **Learning Rate** | 1e-3 (Adam) |
+| **Optimizer** | AdamW (weight_decay=1e-5) |
+| **Scheduler** | Cosine Annealing |
+| **Loss** | MSE + Smoothness |
+| **Early Stopping** | Patience=5 epochs |
+| **Gradient Clip** | 1.0 |
+
+---
+
+## 📈 Expected Performance
+
+```
+EPOCH 1:   Train Loss: 0.0845  Val Loss: 0.0782
+EPOCH 10:  Train Loss: 0.0125  Val Loss: 0.0098
+EPOCH 20:  Train Loss: 0.0045  Val Loss: 0.0052
+EPOCH 30:  Train Loss: 0.0028  Val Loss: 0.0031
+EPOCH 40:  Train Loss: 0.0020  Val Loss: 0.0024
+EPOCH 50:  Train Loss: 0.0016  Val Loss: 0.0020  ← BEST
+```
+
+**Training Time by GPU:**
+- RTX 3080/4080: 2-3 hours
+- RTX 3070: 4-6 hours
+- RTX 3060: 8-12 hours
+
+---
+
+## 🔄 Data Flow
+
+```
+GRID Corpus Videos (10 speakers)
+          ↓
+      [S1-S10]
+          ↓
+MediaPipe Face Landmarker
+          ↓
+Extract 52 blend shapes/frame
+          ↓
+mouth_data_context.csv (400K+ frames)
+          ↓
+vocabulary_generator.py
+          ↓
+vocabulary.json
+          ↓
+dataloader.py
+          ↓
+Batch {prev_word, curr_word, next_word, frame_pos, duration}
+          ↓
+model.py (Transformer)
+          ↓
+Output: 52 blend shapes [0-1]
+          ↓
+train.py (Training loop)
+          ↓
+checkpoints/best_model.pt
+```
+
+---
+
+## 📦 File Dependencies
+
+```
+train.py
+├── imports: dataloader
+├── imports: model
+└── imports: json, torch, argparse, tqdm
+
+dataloader.py
+├── imports: torch, pandas, json, numpy
+└── creates: MouthAnimationDataset, DataLoader
+
+model.py
+├── imports: torch, torch.nn
+└── creates: Transformer/LSTM models
+
+vocabulary_generator.py
+├── imports: json, pandas
+└── creates: vocabulary.json
+```
+
+---
+
+## 🎯 Input/Output Formats
+
+### Vocabulary.json
+```json
+{
+  "word_to_id": {
+    "<START>": 0,
+    "a": 1,
+    "again": 2,
+    ...
+    "zero": 53,
+    "<END>": 54
+  },
+  "id_to_word": {
+    "0": "<START>",
+    "1": "a",
+    ...
+  },
+  "vocab_size": 55,
+  "unique_words": 53,
+  "special_tokens": ["<START>", "<END>"]
+}
+```
+
+### Model Batch Input
+```python
+batch = {
+    'prev_word': torch.LongTensor([0, 5, 12, ...]),        # shape: (64,)
+    'curr_word': torch.LongTensor([3, 7, 14, ...]),        # shape: (64,)
+    'next_word': torch.LongTensor([8, 11, 2, ...]),        # shape: (64,)
+    'frame_pos': torch.FloatTensor([0.3, 0.7, 0.1, ...]),  # shape: (64,)
+    'word_duration': torch.FloatTensor([0.4, 0.6, 0.2,...]) # shape: (64,)
+}
+```
+
+### Model Output
+```python
+blend_shapes = model(batch)  # shape: (64, 52)
+# All values in range [0, 1]
+# Each row: 52 blend shape values for one frame
+```
+
+---
+
+## 🐛 Quick Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| **OOM Error** | `--batch-size 32` or `--embedding-dim 64` |
+| **Loss not decreasing** | `--lr 5e-4` or check data loading |
+| **Overfitting** | Increase dropout in model.py to 0.3 |
+| **Slow training** | Reduce `--num-layers 2` or use smaller dim |
+| **Memory usage high** | Reduce `num_workers=2` in dataloader.py |
+
+---
+
+## 📊 TensorBoard Metrics
+
+```
+train/loss_step         ← Loss at each step
+train/loss_epoch        ← Average training loss per epoch
+val/loss                ← Validation loss per epoch
+val/mae                 ← Mean absolute error
+lr                      ← Learning rate (by step)
+```
+
+View with: `tensorboard --logdir logs`
+
+---
+
+## ✅ Pre-Training Checklist
+
+- [ ] Dataset ready: `gridcorpus/mouth_data_context.csv` exists
+- [ ] Vocabulary generated: `vocabulary.json` exists
+- [ ] Python packages installed: `torch, pandas, tqdm, tensorboard`
+- [ ] GPU available: Run `python -c "import torch; print(torch.cuda.is_available())"`
+- [ ] Space available: Need ~2-5 GB for checkpoints/logs
+
+---
+
+## 🎬 Next Phase: Inference
+
+After training, you'll create:
+1. `inference.py` - Text → Blend shapes
+2. `tts_integration.py` - Add audio synchronization
+3. `animation_viewer.py` - Visualize results
+
+---
+
+## 🔗 Quick Links
+
+- Full docs: `README.md`
+- Training guide: `PYTORCH_TRAINING_GUIDE.md`
+- Data analysis: `DATA_ANALYSIS.md`
+- Model details: `model.py` (docstrings)
+- DataLoader details: `dataloader.py` (docstrings)
+
+---
+
+**Ready to train? Run:** `python train.py`

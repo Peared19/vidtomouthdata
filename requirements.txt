@@ -1,0 +1,10 @@
+# Python 3.8.10
+pandas==2.0.3
+mediapipe==0.10.11
+numpy==1.24.4
+opencv-python==4.12.0.88
+pydub==0.25.1
+requests==2.32.4
+tqdm==4.67.1
+torch==2.4.1+cu121
+gTTS==2.5.4

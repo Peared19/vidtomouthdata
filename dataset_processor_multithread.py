@@ -10,13 +10,13 @@ from multiprocessing import Pool, cpu_count
 from frame_processor import process_frame_full_mouth
 
 # -------------------- Beállítások --------------------
-VIDEO_BASE = "D:/MestInt/datasets/gridcorpus/video"
-ALIGN_BASE = "D:/MestInt/datasets/gridcorpus/align"
-OUTPUT_CSV = "D:/MestInt/word_tomoutmap/mouth_data.csv"
-TEMP_DIR = "D:/MestInt/word_tomoutmap/temp"
+VIDEO_BASE = "gridcorpus/video"
+ALIGN_BASE = "gridcorpus/align"
+OUTPUT_CSV = "gridcorpus/mouth_data_context.csv"
+TEMP_DIR = "gridcorpus/temp"
 MODEL_PATH = "face_landmarker.task"
 
-os.makedirs("D:/MestInt/datasets/gridcorpus", exist_ok=True)
+os.makedirs("gridcorpus", exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 # Face Landmarker model letöltése ha nincs meg
@@ -26,9 +26,9 @@ if not os.path.exists(MODEL_PATH):
     url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
     try:
         urllib.request.urlretrieve(url, MODEL_PATH)
-        print("✅ Model letöltve!")
+        print("Model letöltve!")
     except Exception as e:
-        print(f"❌ Model letöltés hiba: {e}")
+        print(f"Model letöltés hiba: {e}")
         print("Kérjük, töltse le kézzel innen:")
         print(url)
         exit(1)
@@ -58,6 +58,7 @@ def parse_align_file(align_path, sample_rate=25000):
 def process_speaker(speaker):
     """
     Feldolgoz egy speakert és a saját temp CSV-jébe írja az adatokat.
+    Frame-szintű context-aware formátumban (prev_word, curr_word, next_word, frame_pos).
     """
     from mediapipe.tasks import python
     from mediapipe.tasks.python import vision
@@ -105,11 +106,17 @@ def process_speaker(speaker):
 
             # Betöltjük a transzkripciót
             word_list = parse_align_file(align_path, sample_rate=25000)
+            
+            # Szósorrendet kigyűjtjük (csak a szavak listája)
+            words_in_order = [word for word, _, _ in word_list]
 
             # Videó feldolgozása
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_idx = 0
+            
+            # Nyomkövetés: mely szó van most
+            frame_count_in_word = {}  # word_idx → frame count
 
             while True:
                 ret, frame = cap.read()
@@ -124,35 +131,48 @@ def process_speaker(speaker):
                 # Szó meghatározása az aktuális frame idő alapján
                 current_time = frame_idx / fps
                 word_for_frame = None
-                for word, start_time, end_time in word_list:
+                word_idx = None
+                
+                for idx, (word, start_time, end_time) in enumerate(word_list):
                     if start_time <= current_time <= end_time:
                         word_for_frame = word
+                        word_idx = idx
                         break
 
                 if word_for_frame is None:
                     frame_idx += 1
                     continue
 
-                # Mentés CSV-be
+                # Frame számlálása az aktuális szóban
+                if word_idx not in frame_count_in_word:
+                    frame_count_in_word[word_idx] = 0
+                
+                frame_pos_in_word = frame_count_in_word[word_idx]
+                frame_count_in_word[word_idx] += 1
+                
+                # Prev és next szó
+                prev_word = words_in_order[word_idx - 1] if word_idx > 0 else "<START>"
+                next_word = words_in_order[word_idx + 1] if word_idx < len(words_in_order) - 1 else "<END>"
+                
+                # Szó teljes frame száma (hozzávetőleges)
+                # Az align fájlból: end_time - start_time
+                _, start_time, end_time = word_list[word_idx]
+                word_duration_frames = int((end_time - start_time) * fps) + 1
+                
+                # Relatív pozíció 0.0-1.0 között
+                frame_pos = frame_pos_in_word / max(word_duration_frames, 1)
+
+                # Mentés CSV-be (context-aware formát)
                 writer.writerow([
                     speaker,
                     video_file,
                     frame_idx,
+                    prev_word if prev_word else "None",
                     word_for_frame,
-                    mouth_data["mouth_center"][0],
-                    mouth_data["mouth_center"][1],
-                    json.dumps(mouth_data["outer_lip_relative_points"], separators=(',', ':')),
-                    json.dumps(mouth_data["inner_lip_relative_points"], separators=(',', ':')),
-                    json.dumps(mouth_data["blend_shapes"], separators=(',', ':')),
-                    json.dumps(mouth_data["mouth_blend_shapes"], separators=(',', ':')),
-                    json.dumps(mouth_data["eyes_blend_shapes"], separators=(',', ':')),
-                    json.dumps(mouth_data["brow_blend_shapes"], separators=(',', ':')),
-                    json.dumps(mouth_data["face_shape_blend_shapes"], separators=(',', ':')),
-                    json.dumps(mouth_data["3d_landmarks"], separators=(',', ':')),
-                    json.dumps(mouth_data["pixel_landmarks"], separators=(',', ':')),
-                    json.dumps(mouth_data["relative_landmarks"], separators=(',', ':')),
-                    json.dumps(mouth_data["face_center_pixel"], separators=(',', ':')),
-                    json.dumps(mouth_data["face_center_3d"], separators=(',', ':'))
+                    next_word if next_word else "None",
+                    round(frame_pos, 4),  # Relatív pozíció 0.0-1.0
+                    word_duration_frames,  # A szó teljes hossza frame-ben
+                    json.dumps(mouth_data["blend_shapes"], separators=(',', ':'))
                 ])
 
                 frame_idx += 1
@@ -179,21 +199,18 @@ if __name__ == "__main__":
     with Pool(processes=cpu_count()) as pool:
         pool.map(process_speaker, speakers)
     
-    print("\n🔗 Merging all temporary CSV files...")
+    print("\nMerging all temporary CSV files...")
     
     # Összefűzzük az ideiglenes CSV-ket
     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as outfile:
         writer = csv.writer(outfile, delimiter=';')
         
-        # Fejléc írása
+        # Fejléc írása (frame-szintű context-aware formátum)
         writer.writerow([
-            "speaker", "video", "frame_idx", "word",
-            "mouth_center_x", "mouth_center_y",
-            "outer_lip_relative_points", "inner_lip_relative_points",
-            "blend_shapes", "mouth_blend_shapes",
-            "eyes_blend_shapes", "brow_blend_shapes", "face_shape_blend_shapes",
-            "3d_landmarks", "pixel_landmarks", "relative_landmarks",
-            "face_center_pixel", "face_center_3d"
+            "speaker", "video", "frame_idx", 
+            "prev_word", "curr_word", "next_word", 
+            "frame_pos", "word_duration_frames", 
+            "blend_shapes"
         ])
         
         # Minden speaker temp CSV-jét beolvassuk

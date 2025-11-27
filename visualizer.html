@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Face Animator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            background: linear-gradient(to bottom, #2a2a2a, #1a1a1a);
+        }
+        #ui-container {
+            height: auto;
+            min-height: 150px;
+            background: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            border-top: 1px solid #444;
+            gap: 15px;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            max-width: 800px;
+        }
+        #vocab-container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+            padding-right: 5px;
+        }
+        /* Custom scrollbar for vocab */
+        #vocab-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        #vocab-container::-webkit-scrollbar-track {
+            background: #222;
+        }
+        #vocab-container::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 3px;
+        }
+        .vocab-tag {
+            background: #444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #ccc;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .vocab-tag:hover {
+            background: #667eea;
+            color: white;
+            transform: translateY(-1px);
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 15px;
+            border-radius: 8px;
+            border: none;
+            background: #222;
+            color: white;
+            font-size: 18px;
+            outline: none;
+            border: 2px solid #444;
+            transition: border-color 0.3s;
+        }
+        input[type="text"]:focus {
+            border-color: #667eea;
+        }
+        button {
+            padding: 15px 30px;
+            border-radius: 8px;
+            border: none;
+            background: #667eea;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #764ba2;
+        }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: #667eea;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div id="loading">Loading Model...</div>
+    </div>
+    <div id="ui-container">
+        <div class="input-group">
+            <input type="text" id="textInput" placeholder="Type a sentence (e.g., 'blue green place')..." value="blue green place">
+            <button id="animateBtn" onclick="generateAnimation()">Animate</button>
+        </div>
+        <div id="vocab-container">
+            <div style="color: #888;">Loading vocabulary...</div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./node_modules/three/build/three.module.js",
+                "three/addons/": "./node_modules/three/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+        import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        let scene, camera, renderer, mesh, headMesh;
+        let animationFrames = [];
+        let isPlaying = false;
+        let currentFrame = 0;
+        let fps = 30;
+        let lastTime = 0;
+        let audio = null;
+
+        async function init() {
+            const container = document.getElementById('canvas-container');
+            document.getElementById('loading').style.display = 'block';
+
+            // Scene setup
+            scene = new THREE.Scene();
+            
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+            camera.position.set(0, 0.1, 0.5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            container.appendChild(renderer.domElement);
+
+            const environment = new RoomEnvironment();
+            const pmremGenerator = new THREE.PMREMGenerator(renderer);
+            scene.environment = pmremGenerator.fromScene(environment).texture;
+
+            // Controls
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.target.set(0, 0.1, 0);
+            controls.update();
+
+            // Load Model
+            const loader = new GLTFLoader();
+            const ktx2Loader = new KTX2Loader()
+                .setTranscoderPath('./node_modules/three/examples/jsm/libs/basis/')
+                .detectSupport(renderer);
+            loader.setKTX2Loader(ktx2Loader);
+            loader.setMeshoptDecoder(MeshoptDecoder);
+
+            try {
+                const gltf = await loader.loadAsync('models/facecap.glb');
+                mesh = gltf.scene;
+                scene.add(mesh);
+                
+                // Find the head mesh with morph targets
+                mesh.traverse((child) => {
+                    if (child.isMesh && child.morphTargetDictionary) {
+                        headMesh = child;
+                        console.log("Head mesh found:", child.name);
+                    }
+                });
+
+                document.getElementById('loading').style.display = 'none';
+            } catch (error) {
+                console.error("Error loading model:", error);
+                document.getElementById('loading').textContent = "Error loading model (check console)";
+            }
+
+            window.addEventListener('resize', onWindowResize);
+            renderer.setAnimationLoop(animate);
+            
+            loadVocabulary();
+        }
+
+        async function loadVocabulary() {
+            try {
+                const response = await fetch('vocabulary.json');
+                const data = await response.json();
+                const container = document.getElementById('vocab-container');
+                container.innerHTML = '';
+                
+                // Sort words alphabetically
+                const words = Object.keys(data.word_to_id)
+                    .filter(w => !w.startsWith('<')) // Filter out special tokens
+                    .sort();
+                
+                words.forEach(word => {
+                    const tag = document.createElement('div');
+                    tag.className = 'vocab-tag';
+                    tag.textContent = word;
+                    tag.onclick = () => {
+                        const input = document.getElementById('textInput');
+                        // Add word to input
+                        if (input.value && !input.value.endsWith(' ')) {
+                            input.value += ' ';
+                        }
+                        input.value += word;
+                        input.focus();
+                    };
+                    container.appendChild(tag);
+                });
+            } catch (error) {
+                console.error("Error loading vocabulary:", error);
+                document.getElementById('vocab-container').innerHTML = '<div style="color: #ff6b6b;">Error loading vocabulary</div>';
+            }
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate(time) {
+            if (isPlaying && headMesh && animationFrames.length > 0) {
+                if (audio) {
+                    // Sync with audio
+                    if (audio.paused || audio.ended) {
+                        if (audio.ended) {
+                            isPlaying = false;
+                            document.getElementById('animateBtn').disabled = false;
+                            document.getElementById('animateBtn').textContent = "Animate";
+                        }
+                    } else {
+                        // Calculate frame based on audio time
+                        currentFrame = Math.floor(audio.currentTime * fps);
+                        
+                        if (currentFrame < animationFrames.length) {
+                            applyFrame(animationFrames[currentFrame]);
+                        } else if (currentFrame >= animationFrames.length) {
+                            // Hold last frame if audio continues briefly
+                            applyFrame(animationFrames[animationFrames.length - 1]);
+                        }
+                    }
+                } else {
+                    // Fallback if no audio
+                    const interval = 1000 / fps;
+                    if (time - lastTime > interval) {
+                        lastTime = time;
+                        
+                        if (currentFrame < animationFrames.length) {
+                            applyFrame(animationFrames[currentFrame]);
+                            currentFrame++;
+                        } else {
+                            isPlaying = false;
+                            document.getElementById('animateBtn').disabled = false;
+                            document.getElementById('animateBtn').textContent = "Animate";
+                        }
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        function applyFrame(frameData) {
+            if (!headMesh || !headMesh.morphTargetDictionary) return;
+
+            for (const [name, value] of Object.entries(frameData)) {
+                // The model might use "blendShape1.name" or just "name"
+                let index = headMesh.morphTargetDictionary[name];
+                if (index === undefined) {
+                    index = headMesh.morphTargetDictionary[`blendShape1.${name}`];
+                }
+                
+                if (index !== undefined) {
+                    headMesh.morphTargetInfluences[index] = value;
+                }
+            }
+        }
+
+        window.generateAnimation = async function() {
+            const text = document.getElementById('textInput').value;
+            const btn = document.getElementById('animateBtn');
+            
+            if (!text) return;
+
+            btn.disabled = true;
+            btn.textContent = "Generating...";
+
+            try {
+                const response = await fetch('/animate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const data = await response.json();
+                
+                if (data.frames) {
+                    animationFrames = data.frames;
+                    fps = data.fps || 30;
+                    currentFrame = 0;
+                    
+                    // Handle Audio
+                    if (data.audio_url) {
+                        if (audio) {
+                            audio.pause();
+                            audio = null;
+                        }
+                        audio = new Audio(data.audio_url);
+                        try {
+                            await audio.play();
+                        } catch (e) {
+                            console.warn("Audio playback failed (autoplay policy?):", e);
+                        }
+                    }
+
+                    isPlaying = true;
+                    btn.textContent = "Playing...";
+                } else {
+                    alert("No animation generated");
+                    btn.disabled = false;
+                    btn.textContent = "Animate";
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                alert("Error generating animation");
+                btn.disabled = false;
+                btn.textContent = "Animate";
+            }
+        };
+
+        init();
+    </script>
+</body>
+</html>
