@@ -20,7 +20,7 @@ animation_frames/
 temp_audio/
 
 # Dataset files (too large)
-D:/MestInt/datasets/gridcorpus/mouth_data.csv
+datasets/gridcorpus/mouth_data.csv
 mouth_data.csv
 mouth_data_sample_1000.csv
 

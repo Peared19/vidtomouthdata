@@ -214,5 +214,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
 print(f"Serving at http://localhost:{PORT}")
+print("Visit http://localhost:8000/visualizer.html to load the Three.js viewer and test the animation + TTS.")
 with socketserver.TCPServer(("", PORT), Handler) as httpd:
     httpd.serve_forever()
