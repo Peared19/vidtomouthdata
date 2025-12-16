@@ -8,20 +8,13 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from multiprocessing import Pool, cpu_count
 from frame_processor import process_frame_full_mouth
-from g2p_en import G2p
-import nltk
 
 # -------------------- Beállítások --------------------
 VIDEO_BASE = "gridcorpus/video"
 ALIGN_BASE = "gridcorpus/align"
-OUTPUT_CSV = "gridcorpus/mouth_data_phoneme.csv" # Changed output name
+OUTPUT_CSV = "gridcorpus/mouth_data_context.csv"
 TEMP_DIR = "gridcorpus/temp"
 MODEL_PATH = "face_landmarker.task"
-
-# Test Mode Settings
-TEST_MODE = False
-TEST_SPEAKER_LIMIT = 1  # Only process 1 speaker
-TEST_VIDEO_LIMIT = 5    # Only process 5 videos per speaker
 
 os.makedirs("gridcorpus", exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -40,22 +33,14 @@ if not os.path.exists(MODEL_PATH):
         print(url)
         exit(1)
 
-def ensure_nltk_resources():
-    """Ensure necessary NLTK data is downloaded."""
-    try:
-        nltk.data.find('taggers/averaged_perceptron_tagger_eng')
-    except LookupError:
-        print("Downloading missing NLTK resource: averaged_perceptron_tagger_eng...")
-        nltk.download('averaged_perceptron_tagger_eng')
-
 # -------------------- Segédfüggvény --------------------
-def parse_align_file(align_path, g2p, sample_rate=25000):
+def parse_align_file(align_path, sample_rate=25000):
     """
-    Betölti az align fájlt és listát ad vissza: [(phoneme, start_time_s, end_time_s), ...]
-    A szavakat fonémákra bontja és az időt egyenletesen elosztja.
+    Betölti az align fájlt és listát ad vissza: [(word, start_time_s, end_time_s), ...]
+    Az align fájlban a GRID corpus mintaszámokat tartalmaz (nem másodperceket),
+    ezért konvertálni kell a sample_rate alapján.
     """
-    phoneme_list = []
-    
+    word_list = []
     with open(align_path, "r") as f:
         for line in f:
             parts = line.strip().split()
@@ -63,47 +48,20 @@ def parse_align_file(align_path, g2p, sample_rate=25000):
                 start_sample = float(parts[0])
                 end_sample = float(parts[1])
                 word = parts[2]
-                
                 # Átváltás másodpercre:
                 start_time_s = start_sample / sample_rate
                 end_time_s = end_sample / sample_rate
-                duration = end_time_s - start_time_s
-                
-                # Handle silence/pause
-                if word in ["sil", "sp"]:
-                    phoneme_list.append((word, start_time_s, end_time_s))
-                    continue
-                
-                # Convert word to phonemes
-                # g2p returns list like ['B', 'L', 'UW1']
-                # We filter out spaces just in case
-                phonemes = [p for p in g2p(word) if p != ' ']
-                
-                if not phonemes:
-                    # Fallback if no phonemes found (shouldn't happen for valid words)
-                    phoneme_list.append((word, start_time_s, end_time_s))
-                    continue
-                
-                # Distribute duration equally
-                ph_duration = duration / len(phonemes)
-                
-                current_ph_start = start_time_s
-                for ph in phonemes:
-                    current_ph_end = current_ph_start + ph_duration
-                    phoneme_list.append((ph, current_ph_start, current_ph_end))
-                    current_ph_start = current_ph_end
-                    
-    return phoneme_list
+                word_list.append((word, start_time_s, end_time_s))
+    return word_list
 
 # -------------------- Speaker feldolgozó függvény --------------------
 def process_speaker(speaker):
     """
     Feldolgoz egy speakert és a saját temp CSV-jébe írja az adatokat.
-    Frame-szintű context-aware formátumban (prev_ph, curr_ph, next_ph, frame_pos).
+    Frame-szintű context-aware formátumban (prev_word, curr_word, next_word, frame_pos).
     """
-    # Initialize G2P inside the process
-    ensure_nltk_resources()
-    g2p = G2p()
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
     
     # Minden process saját FaceLandmarker objektumot hoz létre
     options = vision.FaceLandmarkerOptions(
@@ -121,7 +79,9 @@ def process_speaker(speaker):
     speaker_align_path = os.path.join(speaker_align_path, "align")
 
     print(f"[{speaker}] Processing started...")
-    
+    print(f"[{speaker}] speaker_video_path: {speaker_video_path}")
+    print(f"[{speaker}] speaker_align_path: {speaker_align_path}")
+
     if not os.path.isdir(speaker_video_path):
         print(f"[{speaker}] Video path not found, skipping...")
         return
@@ -129,17 +89,10 @@ def process_speaker(speaker):
     # Ideiglenes CSV fájl ehhez a speakerhez
     temp_csv = os.path.join(TEMP_DIR, f"{speaker}.csv")
     
-    processed_count = 0
-    
     with open(temp_csv, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile, delimiter=';')
         
-        video_files = sorted(os.listdir(speaker_video_path))
-        
-        for video_file in video_files:
-            if TEST_MODE and processed_count >= TEST_VIDEO_LIMIT:
-                break
-                
+        for video_file in sorted(os.listdir(speaker_video_path)):
             if not video_file.lower().endswith((".mpg", ".mp4")):
                 continue
 
@@ -151,19 +104,19 @@ def process_speaker(speaker):
                 print(f"[{speaker}] Missing align file for {video_file}, skipping...")
                 continue
 
-            # Betöltjük a transzkripciót és fonémákra bontjuk
-            phoneme_list = parse_align_file(align_path, g2p, sample_rate=25000)
+            # Betöltjük a transzkripciót
+            word_list = parse_align_file(align_path, sample_rate=25000)
             
-            # Fonéma sorrendet kigyűjtjük
-            phonemes_in_order = [ph for ph, _, _ in phoneme_list]
+            # Szósorrendet kigyűjtjük (csak a szavak listája)
+            words_in_order = [word for word, _, _ in word_list]
 
             # Videó feldolgozása
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_idx = 0
             
-            # Nyomkövetés: mely fonéma van most
-            frame_count_in_phoneme = {}  # ph_idx → frame count
+            # Nyomkövetés: mely szó van most
+            frame_count_in_word = {}  # word_idx → frame count
 
             while True:
                 ret, frame = cap.read()
@@ -175,49 +128,50 @@ def process_speaker(speaker):
                     frame_idx += 1
                     continue
 
-                # Fonéma meghatározása az aktuális frame idő alapján
+                # Szó meghatározása az aktuális frame idő alapján
                 current_time = frame_idx / fps
-                ph_for_frame = None
-                ph_idx = None
+                word_for_frame = None
+                word_idx = None
                 
-                for idx, (ph, start_time, end_time) in enumerate(phoneme_list):
+                for idx, (word, start_time, end_time) in enumerate(word_list):
                     if start_time <= current_time <= end_time:
-                        ph_for_frame = ph
-                        ph_idx = idx
+                        word_for_frame = word
+                        word_idx = idx
                         break
 
-                if ph_for_frame is None:
+                if word_for_frame is None:
                     frame_idx += 1
                     continue
 
-                # Frame számlálása az aktuális fonémában
-                if ph_idx not in frame_count_in_phoneme:
-                    frame_count_in_phoneme[ph_idx] = 0
+                # Frame számlálása az aktuális szóban
+                if word_idx not in frame_count_in_word:
+                    frame_count_in_word[word_idx] = 0
                 
-                frame_pos_in_ph = frame_count_in_phoneme[ph_idx]
-                frame_count_in_phoneme[ph_idx] += 1
+                frame_pos_in_word = frame_count_in_word[word_idx]
+                frame_count_in_word[word_idx] += 1
                 
-                # Prev és next fonéma
-                prev_ph = phonemes_in_order[ph_idx - 1] if ph_idx > 0 else "<START>"
-                next_ph = phonemes_in_order[ph_idx + 1] if ph_idx < len(phonemes_in_order) - 1 else "<END>"
+                # Prev és next szó
+                prev_word = words_in_order[word_idx - 1] if word_idx > 0 else "<START>"
+                next_word = words_in_order[word_idx + 1] if word_idx < len(words_in_order) - 1 else "<END>"
                 
-                # Fonéma teljes frame száma (hozzávetőleges)
-                _, start_time, end_time = phoneme_list[ph_idx]
-                ph_duration_frames = int((end_time - start_time) * fps) + 1
+                # Szó teljes frame száma (hozzávetőleges)
+                # Az align fájlból: end_time - start_time
+                _, start_time, end_time = word_list[word_idx]
+                word_duration_frames = int((end_time - start_time) * fps) + 1
                 
                 # Relatív pozíció 0.0-1.0 között
-                frame_pos = frame_pos_in_ph / max(ph_duration_frames, 1)
+                frame_pos = frame_pos_in_word / max(word_duration_frames, 1)
 
-                # Mentés CSV-be (phoneme context-aware formát)
+                # Mentés CSV-be (context-aware formát)
                 writer.writerow([
                     speaker,
                     video_file,
                     frame_idx,
-                    prev_ph,
-                    ph_for_frame,
-                    next_ph,
-                    round(frame_pos, 4),
-                    ph_duration_frames,
+                    prev_word if prev_word else "None",
+                    word_for_frame,
+                    next_word if next_word else "None",
+                    round(frame_pos, 4),  # Relatív pozíció 0.0-1.0
+                    word_duration_frames,  # A szó teljes hossza frame-ben
                     json.dumps(mouth_data["blend_shapes"], separators=(',', ':'))
                 ])
 
@@ -225,12 +179,11 @@ def process_speaker(speaker):
 
             cap.release()
             print(f"[{speaker}]  Processed {video_file}")
-            processed_count += 1
     
     # FaceLandmarker felszabadítása
     landmarker.close()
     
-    print(f"[{speaker}] Completed {processed_count} videos.")
+    print(f"[{speaker}] Completed all videos!")
     return speaker
 
 # -------------------- Fő feldolgozás --------------------
@@ -238,10 +191,6 @@ if __name__ == "__main__":
     # Speaker-ek listája
     speakers = sorted([s for s in os.listdir(VIDEO_BASE) 
                       if os.path.isdir(os.path.join(VIDEO_BASE, s))])
-    
-    if TEST_MODE:
-        print(f"⚠️ TEST MODE ACTIVE: Limiting to {TEST_SPEAKER_LIMIT} speakers and {TEST_VIDEO_LIMIT} videos each.")
-        speakers = speakers[:TEST_SPEAKER_LIMIT]
     
     print(f"Found {len(speakers)} speakers to process")
     print(f"Using {cpu_count()} CPU cores")
@@ -256,11 +205,11 @@ if __name__ == "__main__":
     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as outfile:
         writer = csv.writer(outfile, delimiter=';')
         
-        # Fejléc írása (phoneme-szintű context-aware formátum)
+        # Fejléc írása (frame-szintű context-aware formátum)
         writer.writerow([
             "speaker", "video", "frame_idx", 
-            "prev_phoneme", "curr_phoneme", "next_phoneme", 
-            "frame_pos", "phoneme_duration_frames", 
+            "prev_word", "curr_word", "next_word", 
+            "frame_pos", "word_duration_frames", 
             "blend_shapes"
         ])
         
@@ -281,5 +230,5 @@ if __name__ == "__main__":
         os.rmdir(TEMP_DIR)
     except:
         pass
-
+    
 

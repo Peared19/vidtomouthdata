@@ -24,6 +24,9 @@ datasets/gridcorpus/mouth_data.csv
 mouth_data.csv
 mouth_data_sample_1000.csv
 
+# Checkpoints (keep only best models)
+checkpoints_phoneme/*
+!checkpoints_phoneme/best_model.pt
 
 # IDE
 .vscode/

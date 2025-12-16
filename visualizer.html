@@ -218,27 +218,21 @@
 
         async function loadVocabulary() {
             try {
-                const response = await fetch('vocabulary.json');
+                const response = await fetch('phonemes.json');
                 const data = await response.json();
                 const container = document.getElementById('vocab-container');
                 container.innerHTML = '';
                 
-                // Sort words alphabetically
-                const words = Object.keys(data.word_to_id)
-                    .filter(w => !w.startsWith('<')) // Filter out special tokens
-                    .sort();
+                // Load phoneme examples instead of listing all phonemes
+                const examples = ['hello', 'world', 'good morning', 'thank you', 'how are you', 'test'];
                 
-                words.forEach(word => {
+                examples.forEach(example => {
                     const tag = document.createElement('div');
                     tag.className = 'vocab-tag';
-                    tag.textContent = word;
+                    tag.textContent = example;
                     tag.onclick = () => {
                         const input = document.getElementById('textInput');
-                        // Add word to input
-                        if (input.value && !input.value.endsWith(' ')) {
-                            input.value += ' ';
-                        }
-                        input.value += word;
+                        input.value = example;
                         input.focus();
                     };
                     container.appendChild(tag);
