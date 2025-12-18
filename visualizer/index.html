@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Face Animator (Modular)</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="canvas-container">
+    <div id="overlay" class="overlay">
+      <div id="status" class="status">Loading renderer…</div>
+    </div>
+  </div>
+
+  <div id="ui-container">
+    <div class="input-group">
+      <input
+        type="text"
+        id="textInput"
+        placeholder="Type a sentence (e.g., 'hello world')…"
+        value="hello world"
+        autocomplete="off"
+      />
+      <button id="animateBtn" type="button">Animate</button>
+    </div>
+  </div>
+
+  <!--
+    ES modules = JavaScript files that can import/export.
+    The browser loads them natively when served over HTTP.
+
+    We keep an importmap so this works both:
+      - served by your Python server (SimpleHTTP)
+      - served by Vite (dev workflow)
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../node_modules/three/build/three.module.js",
+        "three/addons/": "../node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
